@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-
-<resources>
-    <string name="glink_title">Debug G-Link</string>
-    <string name="quit_app_shortcut">Quit</string>
-</resources>

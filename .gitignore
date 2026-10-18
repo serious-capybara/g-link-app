@@ -15,10 +15,9 @@ local.properties
 .idea/
 *.iml
 .DS_Store
-# Keystores: never commit release keys (debug.keystore is intentionally tracked)
+# Keystores: never commit signing keys
 *.jks
 *.keystore
-!debug.keystore
 # Misc
 .attach_pid*
 .directory

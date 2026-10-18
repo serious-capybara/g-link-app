@@ -74,25 +74,19 @@ android {
             merges += listOf("META-INF/DEPENDENCIES", "META-INF/LICENSE", "META-INF/NOTICE")
         }
     }
-    signingConfigs {
-        getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
-    }
     buildTypes {
+        // Debug = what the Play button in Android Studio runs. Normal dev build, same app ID as release
+        // (com.glink.app). No keystore needed: Android Studio signs it with its own auto-generated
+        // ~/.android/debug.keystore, which is never stored in this repo.
         getByName("debug") {
             isMinifyEnabled = false
             isShrinkResources = false
-            signingConfig = signingConfigs.getByName("debug")
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
         }
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
+            // Sign with your own key (kept OUTSIDE the repo), e.g. via ~/.gradle/gradle.properties:
+            //   GLINK_KEYSTORE=/path/glink.jks  GLINK_KEYSTORE_PASSWORD=...  GLINK_KEY_ALIAS=...  GLINK_KEY_PASSWORD=...
         }
     }
     lint {
