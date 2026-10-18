@@ -1,0 +1,43 @@
+/*
+ * SPDX-FileCopyrightText: 2024 Mash Kyrielight <fiepi@live.com>
+ *
+ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
+ */
+package com.glink.app.base
+import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup.MarginLayoutParams
+import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
+import androidx.viewbinding.ViewBinding
+import com.glink.app.extensions.getSafeDrawInsets
+import com.glink.app.extensions.setOnApplyWindowInsetsListenerCompat
+
+abstract class BaseActivity<VB: ViewBinding> : AppCompatActivity() {
+
+    protected abstract val binding: VB
+
+    open val isScrollable = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+        setContentView(binding.root)
+        binding.root.setOnApplyWindowInsetsListenerCompat { view, insets ->
+            onWindowInsetsChanged(view, insets)
+            insets
+        }
+    }
+
+    open fun onWindowInsetsChanged(view: View, insets: WindowInsetsCompat) {
+        val safeDrawInsets = insets.getSafeDrawInsets()
+        view.updateLayoutParams<MarginLayoutParams> {
+            bottomMargin = if (isScrollable) 0 else safeDrawInsets.bottom
+            leftMargin = safeDrawInsets.left
+            rightMargin = safeDrawInsets.right
+        }
+    }
+
+}

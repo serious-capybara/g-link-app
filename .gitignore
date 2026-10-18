@@ -1,0 +1,26 @@
+# Gradle / Android
+.gradle/
+build/
+/captures/
+/out/ /gen/ /bin/ /target/ /classes/ /release/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.log
+# Kotlin / IDE
+.kotlin/
+.idea/
+*.iml
+.DS_Store
+# Keystores: never commit release keys (debug.keystore is intentionally tracked)
+*.jks
+*.keystore
+!debug.keystore
+# Misc
+.attach_pid*
+.directory
+GPUCache/
+.cxx/
