@@ -6,24 +6,25 @@
 package com.glink.app.ui.compose.components
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.glink.app.ui.compose.KdeTheme
 import com.glink.app.R
 
 @Composable
 fun SectionHeader(title: String) {
-    KdeTitleMediumText(
-        text = title,
+    // Small, spaced-out label like iOS/macOS list headers
+    Text(
+        text = title.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(
-            top = 16.dp,
-            start = 16.dp,
-            end = 16.dp
-        ),
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(top = 20.dp, start = 8.dp, end = 8.dp, bottom = 4.dp),
     )
 }
 

@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import org.apache.commons.collections4.MultiValuedMap
 import org.apache.commons.collections4.multimap.ArrayListValuedHashMap
 import com.glink.app.backends.BaseLink
+import com.glink.app.backends.lan.LanLink
 import com.glink.app.backends.BaseLink.PacketReceiver
 import com.glink.app.DeviceInfo.Companion.loadFromSettings
 import com.glink.app.DeviceStats.countReceived
@@ -308,6 +309,10 @@ class Device : PacketReceiver {
         notificationManager.cancel(notificationId)
     }
 
+    /** IP address of this device on the LAN link, if it is connected over Wi-Fi/Ethernet. */
+    val lanHost: String?
+        get() = links.filterIsInstance<LanLink>().firstNotNullOfOrNull { it.remoteHost }
+
     val isReachable: Boolean
         get() = links.isNotEmpty()
 
@@ -463,6 +468,9 @@ class Device : PacketReceiver {
         abstract fun onFailure(e: Throwable)
 
         open fun onPayloadProgressChanged(percent: Int) {}
+
+        /** Throughput of the last ~500 ms, in MB/s (1 MB = 1,048,576 bytes). */
+        open fun onPayloadSpeedChanged(megabytesPerSecond: Double) {}
     }
 
     private val defaultCallback: SendPacketStatusCallback = object : SendPacketStatusCallback() {

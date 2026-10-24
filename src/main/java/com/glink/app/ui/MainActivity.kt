@@ -12,27 +12,21 @@ import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.Menu
-import android.view.MenuItem
 import android.view.View
-import android.widget.ImageView
-import android.widget.TextView
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
-import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
-import androidx.core.view.GravityCompat
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.get
-import androidx.core.view.size
+import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
-import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.Fragment
 import androidx.preference.PreferenceManager
-import com.google.android.material.navigation.NavigationView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -45,44 +39,39 @@ import com.glink.app.extensions.setOnApplyWindowInsetsListenerCompat
 import com.glink.app.plugins.share.ShareSettingsFragment
 import com.glink.app.ui.about.AboutFragment
 import com.glink.app.R
+import com.glink.app.ui.compose.GLinkTheme
+import com.glink.app.ui.compose.components.FloatingNavBar
+import com.glink.app.ui.compose.components.FloatingNavBarSpace
+import com.glink.app.ui.compose.components.NavDestination
 import com.glink.app.databinding.ActivityMainBinding
 
-private const val MENU_ENTRY_ADD_DEVICE = 1 //0 means no-selection
+private const val MENU_ENTRY_ADD_DEVICE = 1 // "Pair new device" in the floating menu (also the device list)
 private const val MENU_ENTRY_SETTINGS = 2
 private const val MENU_ENTRY_ABOUT = 3
-private const val MENU_ENTRY_DEVICE_FIRST_ID = 1000 //All subsequent ids are devices in the menu
-private const val MENU_ENTRY_DEVICE_UNKNOWN = 9999 //It's still a device, but we don't know which one yet
+private const val MENU_ENTRY_DEVICE = 4 // a device's own page: the floating menu is hidden there
 private const val STORAGE_LOCATION_CONFIGURED = 2020
 private const val STATE_SELECTED_MENU_ENTRY = "selected_entry" //Saved only in onSaveInstanceState
 private const val STATE_SELECTED_DEVICE = "selected_device" //Saved persistently in preferences
 
 class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
     private val binding by lazy { ActivityMainBinding.inflate(layoutInflater) }
-    private val mNavigationView: NavigationView by lazy { binding.navigationDrawer }
-    private var mDrawerLayout: DrawerLayout? = null
-
-    private lateinit var mNavViewDeviceName: TextView
-
     private var mCurrentDevice: String? = null
     private var mCurrentMenuEntry = 0
         set(value) {
             field = value
-            //Enabling "go to default fragment on back" callback when user in settings or "about" fragment
+            // Back from "settings" or "about" goes to the default fragment
             mainFragmentCallback.isEnabled = value == MENU_ENTRY_SETTINGS || value == MENU_ENTRY_ABOUT
+            updateFloatingNav()
         }
     private val preferences: SharedPreferences by lazy { getSharedPreferences("stored_menu_selection", MODE_PRIVATE) }
-    private val mMapMenuToDeviceId = HashMap<MenuItem, String>()
 
-    private val closeDrawerCallback = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() {
-            mDrawerLayout?.closeDrawer(mNavigationView)
-        }
-    }
+    // State read by the floating menu composable
+    private var navSelected by mutableStateOf<NavDestination?>(NavDestination.PAIR)
+    private var systemNavBottomInset = 0
 
     private val mainFragmentCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            mCurrentMenuEntry = mCurrentDevice?.let { deviceIdToMenuEntryId(it) } ?: MENU_ENTRY_ADD_DEVICE
-            mNavigationView.setCheckedItem(mCurrentMenuEntry)
+            mCurrentMenuEntry = if (mCurrentDevice != null) MENU_ENTRY_DEVICE else MENU_ENTRY_ADD_DEVICE
             setContentFragment(mCurrentDevice?.let { DeviceFragment.newInstance(it, false) } ?: PairingFragment())
         }
     }
@@ -94,66 +83,28 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
 
         val root = binding.root
         setContentView(root)
-        mDrawerLayout = root as? DrawerLayout
 
-        // Pad the drawer header directly: DrawerLayout's default child dispatch stops at
-        // AppBarLayout (which consumes the insets via its own fitsSystemWindows), so neither
-        // NavigationView nor its header ever receive a dispatch.
+        // Keep the floating menu clear of the system navigation bar / gesture area. Read the raw insets on the
+        // root (child views further down may already have had theirs consumed by the app bar).
         root.setOnApplyWindowInsetsListenerCompat { _, insets ->
-            mNavigationView.getHeaderView(0)?.updatePadding(
-                top = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            )
+            systemNavBottomInset = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            updateFloatingNav()
             insets
         }
 
-        val mDrawerHeader = mNavigationView.getHeaderView(0)
-        mNavViewDeviceName = mDrawerHeader.findViewById(R.id.device_name)
-        val mNavViewDeviceType = mDrawerHeader.findViewById<ImageView>(R.id.device_type)
-
         setSupportActionBar(binding.toolbarLayout.toolbar)
-        mDrawerLayout?.let {
-            supportActionBar?.setDisplayHomeAsUpEnabled(true)
-            val mDrawerToggle = DrawerToggle(it).apply { syncState() }
-            it.addDrawerListener(mDrawerToggle)
-            it.setDrawerShadow(R.drawable.drawer_shadow, GravityCompat.START)
-        } ?: {
-            supportActionBar?.setDisplayShowHomeEnabled(false)
-            supportActionBar?.setHomeButtonEnabled(false)
+        supportActionBar?.setDisplayHomeAsUpEnabled(false)
+        supportActionBar?.setDisplayShowHomeEnabled(false)
+
+        binding.floatingNav.setContent {
+            GLinkTheme(this) {
+                FloatingNavBar(selected = navSelected, onSelect = ::onNavDestinationSelected)
+            }
         }
 
         // Note: The preference changed listener should be registered before getting the name, because getting
         // it can trigger a background fetch from the internet that will eventually update the preference
         PreferenceManager.getDefaultSharedPreferences(this).registerOnSharedPreferenceChangeListener(this)
-        val deviceName = DeviceHelper.getDeviceName(this)
-        mNavViewDeviceType?.setImageDrawable(DeviceHelper.deviceType.getIcon(this))
-        mNavViewDeviceName.text = deviceName
-        mNavigationView.setNavigationItemSelectedListener { menuItem: MenuItem ->
-            mCurrentMenuEntry = menuItem.itemId
-            when (mCurrentMenuEntry) {
-                MENU_ENTRY_ADD_DEVICE -> {
-                    mCurrentDevice = null
-                    preferences.edit { putString(STATE_SELECTED_DEVICE, null) }
-                    setContentFragment(PairingFragment())
-                }
-
-                MENU_ENTRY_SETTINGS -> {
-                    preferences.edit { putString(STATE_SELECTED_DEVICE, null) }
-                    setContentFragment(SettingsFragment())
-                }
-
-                MENU_ENTRY_ABOUT -> {
-                    preferences.edit { putString(STATE_SELECTED_DEVICE, null) }
-                    setContentFragment(AboutFragment.newInstance())
-                }
-
-                else -> {
-                    val deviceId = mMapMenuToDeviceId[menuItem]
-                    onDeviceSelected(deviceId)
-                }
-            }
-            mDrawerLayout?.closeDrawer(mNavigationView)
-            true
-        }
 
         // Decide which menu entry should be selected at start
         var savedDevice: String?
@@ -168,7 +119,7 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
             intent.hasExtra(EXTRA_DEVICE_ID) -> {
                 Log.i(this::class.simpleName, "Loading selected device from parameter")
                 savedDevice = intent.getStringExtra(EXTRA_DEVICE_ID)
-                savedMenuEntry = MENU_ENTRY_DEVICE_UNKNOWN
+                savedMenuEntry = MENU_ENTRY_DEVICE
                 // If pairStatus is not empty, then the user has accepted/reject the pairing from the notification
                 val pairStatus = intent.getStringExtra(PAIR_REQUEST_STATUS)
                 if (pairStatus != null) {
@@ -183,18 +134,19 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
             savedInstanceState != null -> {
                 Log.i(this::class.simpleName, "Loading selected device from saved activity state")
                 savedDevice = savedInstanceState.getString(STATE_SELECTED_DEVICE)
+                // Older versions stored device menu ids (>= 1000): those are all "a device page" now
                 savedMenuEntry = savedInstanceState.getInt(STATE_SELECTED_MENU_ENTRY, MENU_ENTRY_ADD_DEVICE)
+                    .let { if (it >= 1000) MENU_ENTRY_DEVICE else it }
             }
 
             else -> {
                 Log.i(this::class.simpleName, "Loading selected device from persistent storage")
                 savedDevice = preferences.getString(STATE_SELECTED_DEVICE, null)
-                savedMenuEntry = if (savedDevice != null) MENU_ENTRY_DEVICE_UNKNOWN else MENU_ENTRY_ADD_DEVICE
+                savedMenuEntry = if (savedDevice != null) MENU_ENTRY_DEVICE else MENU_ENTRY_ADD_DEVICE
             }
         }
         mCurrentMenuEntry = savedMenuEntry
         mCurrentDevice = savedDevice
-        mNavigationView.setCheckedItem(savedMenuEntry)
 
         //FragmentManager will restore whatever fragment was there
         if (savedInstanceState != null) {
@@ -203,7 +155,7 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
         }
 
         // Activate the chosen fragment and select the entry in the menu
-        if (savedMenuEntry >= MENU_ENTRY_DEVICE_FIRST_ID && savedDevice != null) {
+        if (savedMenuEntry == MENU_ENTRY_DEVICE && savedDevice != null) {
             onDeviceSelected(savedDevice)
         } else {
             when (mCurrentMenuEntry) {
@@ -255,70 +207,56 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
         return if (pairStatus == PAIRING_ACCEPTED || pairStatus == PAIRING_PENDING) deviceId else null
     }
 
-    private fun deviceIdToMenuEntryId(deviceId: String?): Int {
-        for ((key, value) in mMapMenuToDeviceId) {
-            if (value == deviceId) {
-                return key.itemId
+    /** Floating menu taps: Pair / Settings / About. */
+    private fun onNavDestinationSelected(destination: NavDestination) {
+        preferences.edit { putString(STATE_SELECTED_DEVICE, null) }
+        when (destination) {
+            NavDestination.PAIR -> {
+                mCurrentDevice = null
+                mCurrentMenuEntry = MENU_ENTRY_ADD_DEVICE
+                setContentFragment(PairingFragment())
+            }
+            NavDestination.SETTINGS -> {
+                mCurrentMenuEntry = MENU_ENTRY_SETTINGS
+                setContentFragment(SettingsFragment())
+            }
+            NavDestination.ABOUT -> {
+                mCurrentMenuEntry = MENU_ENTRY_ABOUT
+                setContentFragment(AboutFragment.newInstance())
             }
         }
-        return MENU_ENTRY_DEVICE_UNKNOWN
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return if (item.itemId == android.R.id.home) {
-            mDrawerLayout?.openDrawer(mNavigationView)
-            true
-        } else {
-            super.onOptionsItemSelected(item)
+    /** Syncs the floating menu (selection, visibility, bottom spacing) with the current screen. */
+    private fun updateFloatingNav() {
+        navSelected = when (mCurrentMenuEntry) {
+            MENU_ENTRY_ADD_DEVICE -> NavDestination.PAIR
+            MENU_ENTRY_SETTINGS -> NavDestination.SETTINGS
+            MENU_ENTRY_ABOUT -> NavDestination.ABOUT
+            else -> null
         }
-    }
+        val showMenu = mCurrentMenuEntry != MENU_ENTRY_DEVICE
+        binding.floatingNav.isVisible = showMenu
+        binding.floatingNav.setPadding(0, 0, 0, systemNavBottomInset)
 
-    private fun updateDeviceList() {
-        val menu = mNavigationView.menu
-        menu.clear()
-        mMapMenuToDeviceId.clear()
-        val devicesMenu = menu.addSubMenu(R.string.devices)
-        var id = MENU_ENTRY_DEVICE_FIRST_ID
-        val devices: Collection<Device> = GLink.getInstance().devices.values
-        for (device in devices) {
-            if (device.isReachable && device.isPaired) {
-                val item = devicesMenu.add(Menu.FIRST, id++, 1, device.name)
-                item.icon = device.icon
-                item.isCheckable = true
-                mMapMenuToDeviceId[item] = device.deviceId
-            }
-        }
-        val addDeviceItem = devicesMenu.add(Menu.FIRST, MENU_ENTRY_ADD_DEVICE, 1000, R.string.pair_new_device)
-        addDeviceItem.setIcon(R.drawable.ic_action_content_add_circle_outline_32dp)
-        addDeviceItem.isCheckable = true
-        val settingsItem = menu.add(Menu.FIRST, MENU_ENTRY_SETTINGS, 1000, R.string.settings)
-        settingsItem.setIcon(R.drawable.ic_settings_white_32dp)
-        settingsItem.isCheckable = true
-        val aboutItem = menu.add(Menu.FIRST, MENU_ENTRY_ABOUT, 1000, R.string.about)
-        aboutItem.setIcon(R.drawable.ic_baseline_info_24)
-        aboutItem.isCheckable = true
+        // The menu floats over the bottom of the screen: keep fragments clear of it
+        val spacePx = (FloatingNavBarSpace.value * resources.displayMetrics.density).toInt()
+        binding.container.setPadding(0, 0, 0, if (showMenu) spacePx + systemNavBottomInset else 0)
 
-        //Ids might have changed
-        if (mCurrentMenuEntry >= MENU_ENTRY_DEVICE_FIRST_ID) {
-            mCurrentMenuEntry = deviceIdToMenuEntryId(mCurrentDevice)
-        }
-        mNavigationView.setCheckedItem(mCurrentMenuEntry)
+        // Subtitle: which device this is (shown on the main screens only)
+        supportActionBar?.subtitle = if (showMenu) DeviceHelper.getDeviceName(this) else null
     }
 
     override fun onStart() {
         super.onStart()
         BackgroundService.Start(applicationContext)
-        GLink.getInstance().addDeviceListChangedCallback(this::class.simpleName!!) { runOnUiThread { updateDeviceList() } }
-        updateDeviceList()
+        BackgroundService.ForceRefreshConnections(applicationContext)
         onBackPressedDispatcher.addCallback(mainFragmentCallback)
-        onBackPressedDispatcher.addCallback(closeDrawerCallback)
-        if (mDrawerLayout == null) closeDrawerCallback.isEnabled = false
+        updateFloatingNav()
     }
 
     override fun onStop() {
-        GLink.getInstance().removeDeviceListChangedCallback(this::class.simpleName!!)
         mainFragmentCallback.remove()
-        closeDrawerCallback.remove()
         super.onStop()
     }
 
@@ -327,16 +265,10 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
         mCurrentDevice = deviceId
         preferences.edit { putString(STATE_SELECTED_DEVICE, deviceId) }
         if (mCurrentDevice != null) {
-            mCurrentMenuEntry = deviceIdToMenuEntryId(deviceId)
-            if (mCurrentMenuEntry == MENU_ENTRY_DEVICE_UNKNOWN) {
-                uncheckAllMenuItems(mNavigationView.menu)
-            } else {
-                mNavigationView.setCheckedItem(mCurrentMenuEntry)
-            }
+            mCurrentMenuEntry = MENU_ENTRY_DEVICE
             setContentFragment(DeviceFragment.newInstance(deviceId, fromDeviceList))
         } else {
             mCurrentMenuEntry = MENU_ENTRY_ADD_DEVICE
-            mNavigationView.setCheckedItem(mCurrentMenuEntry)
             setContentFragment(PairingFragment())
         }
     }
@@ -417,16 +349,8 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         if (DeviceHelper.KEY_DEVICE_NAME_PREFERENCE == key) {
-            mNavViewDeviceName.text = DeviceHelper.getDeviceName(this)
+            updateFloatingNav()
             BackgroundService.ForceRefreshConnections(this) //Re-send our identity packet
-        }
-    }
-
-    private fun uncheckAllMenuItems(menu: Menu) {
-        val size = menu.size
-        for (i in 0 until size) {
-            val item = menu[i]
-            item.subMenu?.let { uncheckAllMenuItems(it) } ?: item.setChecked(false)
         }
     }
 
@@ -439,23 +363,6 @@ class MainActivity : AppCompatActivity(), OnSharedPreferenceChangeListener {
         const val RESULT_NEEDS_RELOAD = RESULT_FIRST_USER
         const val RESULT_NOTIFICATIONS_ENABLED = RESULT_FIRST_USER+1
         const val FLAG_FORCE_OVERVIEW = "forceOverview"
-    }
-
-    private inner class DrawerToggle(drawerLayout: DrawerLayout) : ActionBarDrawerToggle(
-        this,  /* host Activity */
-        drawerLayout,  /* DrawerLayout object */
-        R.string.open,  /* "open drawer" description */
-        R.string.close /* "close drawer" description */
-    ) {
-        override fun onDrawerClosed(drawerView: View) {
-            super.onDrawerClosed(drawerView)
-            closeDrawerCallback.isEnabled = false
-        }
-
-        override fun onDrawerOpened(drawerView: View) {
-            super.onDrawerOpened(drawerView)
-            closeDrawerCallback.isEnabled = true
-        }
     }
 
 }

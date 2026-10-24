@@ -9,7 +9,6 @@ import android.os.Build
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.preference.PreferenceManager
-import com.google.android.material.color.DynamicColors
 
 /**
  * Utilities for working with android [Themes][android.content.res.Resources.Theme].
@@ -54,7 +53,7 @@ object ThemeUtil {
         val appTheme = PreferenceManager
             .getDefaultSharedPreferences(application)
             .getString("theme_pref", DEFAULT_MODE)!!
-        DynamicColors.applyToActivitiesIfAvailable(application)
+        // Brand colours are fixed on purpose (no wallpaper-based dynamic colour) so the app looks the same everywhere
         applyTheme(appTheme)
     }
 }

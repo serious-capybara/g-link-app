@@ -30,6 +30,7 @@ import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.cert.Certificate
+import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.time.LocalDate
@@ -138,6 +139,63 @@ object SslHelper {
         resources.updateConfiguration(config, resources.displayMetrics)
     }
 
+    @JvmStatic
+    fun getCertificatePem(cert: Certificate = certificate): String {
+        return try {
+            val base64Cert = Base64.encodeToString(cert.encoded, Base64.DEFAULT)
+            "-----BEGIN CERTIFICATE-----\n$base64Cert-----END CERTIFICATE-----\n"
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    @JvmStatic
+    fun parsePemCertificate(pemString: String): Certificate {
+        val cleanBase64 = pemString
+            .replace("-----BEGIN CERTIFICATE-----", "")
+            .replace("-----END CERTIFICATE-----", "")
+            .replace("\r", "")
+            .replace("\n", "")
+            .trim()
+        val certificateBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+        return parseCertificate(certificateBytes)
+    }
+
+    private fun createStrictTrustManager(expectedRemoteCert: Certificate, deviceId: String): Array<TrustManager> {
+        return arrayOf(object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> {
+                return if (expectedRemoteCert is X509Certificate) {
+                    arrayOf(expectedRemoteCert)
+                } else {
+                    emptyArray()
+                }
+            }
+
+            @Throws(CertificateException::class)
+            override fun checkClientTrusted(certs: Array<out X509Certificate>?, authType: String?) {
+                verifyPeerCertificate(certs, deviceId)
+            }
+
+            @Throws(CertificateException::class)
+            override fun checkServerTrusted(certs: Array<out X509Certificate>?, authType: String?) {
+                verifyPeerCertificate(certs, deviceId)
+            }
+
+            @Throws(CertificateException::class)
+            private fun verifyPeerCertificate(certs: Array<out X509Certificate>?, deviceId: String) {
+                if (certs.isNullOrEmpty() || certs[0] == null) {
+                    throw CertificateException("No peer certificate presented for device $deviceId")
+                }
+                val peerCert = certs[0]
+                peerCert.checkValidity()
+                if (!peerCert.encoded.contentEquals(expectedRemoteCert.encoded)) {
+                    Log.e(LOG_TAG, "Strict TLS check failed: Presented certificate does not match stored certificate for $deviceId")
+                    throw CertificateException("Presented certificate does not match stored certificate for $deviceId")
+                }
+            }
+        })
+    }
+
     private fun getSslContextForDevice(context: Context, deviceId: String, isDeviceTrusted: Boolean): SSLContext {
         // TODO: This method is called for each payload that is sent. Cache the result.
         val privateKey = getPrivateKey(context)
@@ -147,24 +205,16 @@ object SslHelper {
         keyStore.load(null, null)
         keyStore.setKeyEntry("key", privateKey, "".toCharArray(), arrayOf(certificate))
 
-        // Add device certificate if device trusted
-        if (isDeviceTrusted) {
-            val remoteDeviceCertificate = TrustedDevices.getDeviceCertificate(context, deviceId)
-            keyStore.setCertificateEntry(deviceId, remoteDeviceCertificate)
-        }
-
         // Setup key manager factory
         val keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
         keyManagerFactory.init(keyStore, "".toCharArray())
 
-        // Setup default trust manager
-        val trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
-        trustManagerFactory.init(keyStore)
-
-        // Setup custom trust manager if device not trusted
         val tlsContext = SSLContext.getInstance("TLSv1.2") // Use TLS up to 1.2, since 1.3 seems to cause issues in some (older?) devices
         if (isDeviceTrusted) {
-            tlsContext.init(keyManagerFactory.keyManagers, trustManagerFactory.trustManagers, RandomHelper.secureRandom)
+            val remoteDeviceCertificate = TrustedDevices.getDeviceCertificate(context, deviceId)
+            keyStore.setCertificateEntry(deviceId, remoteDeviceCertificate)
+            val strictTrustManagers = createStrictTrustManager(remoteDeviceCertificate, deviceId)
+            tlsContext.init(keyManagerFactory.keyManagers, strictTrustManagers, RandomHelper.secureRandom)
         } else {
             tlsContext.init(keyManagerFactory.keyManagers, trustAllCerts, RandomHelper.secureRandom)
         }
@@ -186,7 +236,7 @@ object SslHelper {
     }
 
     @JvmStatic
-    @Throws(java.security.cert.CertificateException::class)
+    @Throws(CertificateException::class)
     fun convertToSslSocket(context: Context, socket: Socket, deviceId: String, isDeviceTrusted: Boolean, clientMode: Boolean): SSLSocket {
         val sslSocketFactory = getSslContextForDevice(context, deviceId, isDeviceTrusted).socketFactory
         val sslSocket = sslSocketFactory.createSocket(socket, socket.inetAddress.hostAddress, socket.port, true) as SSLSocket

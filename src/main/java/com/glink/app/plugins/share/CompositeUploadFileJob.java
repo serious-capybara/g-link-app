@@ -152,7 +152,7 @@ public class CompositeUploadFileJob extends BackgroundJob<Device, Void> {
     private void setProgress(int progress) {
         synchronized (lock) {
             uploadNotification.setProgress(progress, getDevice().getContext().getResources()
-                    .getQuantityString(R.plurals.outgoing_files_text, totalNumFiles, currentFileName, currentFileNum, totalNumFiles));
+                    .getQuantityString(R.plurals.outgoing_files_text, totalNumFiles, currentFileName, currentFileNum, totalNumFiles) + speedSuffix);
         }
         uploadNotification.show();
     }
@@ -200,7 +200,14 @@ public class CompositeUploadFileJob extends BackgroundJob<Device, Void> {
         currentNetworkPacket.cancel();
     }
 
+    private volatile String speedSuffix = "";
+
     private class SendPacketStatusCallback extends Device.SendPacketStatusCallback {
+        @Override
+        public void onPayloadSpeedChanged(double megabytesPerSecond) {
+            speedSuffix = "  \u00b7  " + com.glink.app.helpers.TransferTuning.formatSpeed(megabytesPerSecond);
+        }
+
         @Override
         public void onPayloadProgressChanged(int percent) {
             float send = totalSend + (currentNetworkPacket.getPayloadSize() * ((float)percent / 100));

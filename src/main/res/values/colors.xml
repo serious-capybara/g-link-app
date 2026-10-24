@@ -1,8 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="launcher_background">#2F6BFF</color>
 
-    <color name="launcher_background">#3daee9</color>
-
-    <!-- Whenever possible, don't hardcode colors here and rely on the default ones (eg: from the system or user theme) -->
-
+    <!-- G-Link brand palette (light). Contrast checked: text on its surface >= 4.5:1 -->
+    <color name="glink_primary">#2B5BF0</color>
+    <color name="glink_on_primary">#FFFFFF</color>
+    <color name="glink_primary_container">#E1E8FF</color>
+    <color name="glink_on_primary_container">#0B1F66</color>
+    <color name="glink_secondary">#6A4BEA</color>
+    <color name="glink_on_secondary">#FFFFFF</color>
+    <color name="glink_secondary_container">#EAE4FF</color>
+    <color name="glink_on_secondary_container">#241160</color>
+    <color name="glink_background">#F6F7FB</color>
+    <color name="glink_surface">#FFFFFF</color>
+    <color name="glink_on_surface">#14161F</color>
+    <color name="glink_surface_variant">#ECEEF6</color>
+    <color name="glink_on_surface_variant">#4A4F63</color>
+    <color name="glink_outline">#8A8FA6</color>
+    <color name="glink_outline_variant">#D9DCE8</color>
+    <color name="glink_error">#C62828</color>
+    <color name="glink_on_error">#FFFFFF</color>
+    <color name="glink_error_container">#FDE7E7</color>
+    <color name="glink_on_error_container">#5C0A0A</color>
 </resources>

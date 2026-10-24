@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- G-Link brand palette (dark) -->
+    <color name="glink_primary">#8FA8FF</color>
+    <color name="glink_on_primary">#0A1C5C</color>
+    <color name="glink_primary_container">#22358F</color>
+    <color name="glink_on_primary_container">#DCE4FF</color>
+    <color name="glink_secondary">#B8A6FF</color>
+    <color name="glink_on_secondary">#2A1670</color>
+    <color name="glink_secondary_container">#41308A</color>
+    <color name="glink_on_secondary_container">#E8E0FF</color>
+    <color name="glink_background">#0E1018</color>
+    <color name="glink_surface">#161926</color>
+    <color name="glink_on_surface">#ECEEF8</color>
+    <color name="glink_surface_variant">#1F2335</color>
+    <color name="glink_on_surface_variant">#B3B8CC</color>
+    <color name="glink_outline">#6B7189</color>
+    <color name="glink_outline_variant">#2C3147</color>
+    <color name="glink_error">#FF8A80</color>
+    <color name="glink_on_error">#4A0A0A</color>
+    <color name="glink_error_container">#4A1717</color>
+    <color name="glink_on_error_container">#FFD9D6</color>
+</resources>

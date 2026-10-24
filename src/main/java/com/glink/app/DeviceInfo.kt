@@ -10,6 +10,7 @@ import androidx.annotation.DrawableRes
 import androidx.core.content.ContextCompat
 import com.glink.app.helpers.DeviceHelper
 import com.glink.app.helpers.TrustedDevices
+import com.glink.app.helpers.security.SslHelper
 import com.glink.app.R
 import java.security.cert.Certificate
 import java.security.cert.CertificateEncodingException
@@ -50,7 +51,6 @@ data class DeviceInfo(
 
     /**
      * Serializes to a NetworkPacket, which LanLinkProvider uses to send this data over the network.
-     * The serialization doesn't include the certificate, since LanLink can query that from the socket.
      * Can be deserialized using fromIdentityPacketAndCert(), given a certificate.
      */
     fun toIdentityPacket(): NetworkPacket =
@@ -61,6 +61,7 @@ data class DeviceInfo(
             np["deviceType"] = type.toString()
             np["incomingCapabilities"] = incomingCapabilities!!
             np["outgoingCapabilities"] = outgoingCapabilities!!
+            np["certificate"] = SslHelper.getCertificatePem(certificate)
         }
 
     companion object {
@@ -92,16 +93,25 @@ data class DeviceInfo(
 
         /**
          * Recreates a DeviceInfo object that was serialized using toIdentityPacket().
-         * Since toIdentityPacket() doesn't serialize the certificate, this needs to be passed separately.
+         * If identityPacket contains a certificate string, parses it; otherwise falls back to the socket certificate.
          */
         @JvmStatic
         fun fromIdentityPacketAndCert(identityPacket: NetworkPacket, certificate: Certificate) =
             with(identityPacket) {
+                val certToUse = if (has("certificate")) {
+                    try {
+                        SslHelper.parsePemCertificate(getString("certificate"))
+                    } catch (e: Exception) {
+                        certificate
+                    }
+                } else {
+                    certificate
+                }
                 DeviceInfo(
                     id = getString("deviceId"), // Redundant: We could read this from the certificate instead
                     name = DeviceHelper.filterInvalidCharactersFromDeviceNameAndLimitLength(getString("deviceName", "unknown")),
                     type = DeviceType.fromString(getString("deviceType", "desktop")),
-                    certificate = certificate,
+                    certificate = certToUse,
                     protocolVersion = getInt("protocolVersion"),
                     incomingCapabilities = getStringSet("incomingCapabilities"),
                     outgoingCapabilities = getStringSet("outgoingCapabilities")

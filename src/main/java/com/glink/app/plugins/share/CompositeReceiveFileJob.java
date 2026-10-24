@@ -22,6 +22,8 @@ import org.apache.commons.io.IOUtils;
 import com.glink.app.Device;
 import com.glink.app.helpers.FilesHelper;
 import com.glink.app.helpers.MediaStoreHelper;
+import com.glink.app.helpers.SpeedMeter;
+import com.glink.app.helpers.TransferTuning;
 import com.glink.app.NetworkPacket;
 import com.glink.app.async.BackgroundJob;
 import com.glink.app.R;
@@ -36,6 +38,7 @@ import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * A type of {@link BackgroundJob} that reads Files from another device.
@@ -61,6 +64,8 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
     private int currentFileNum;
     private long totalReceived;
     private long lastProgressTimeMillis;
+    private final SpeedMeter speedMeter = new SpeedMeter();
+    private String speedSuffix = "";
     private long prevProgressPercentage;
 
     private final Object lock;                              //Use to protect concurrent access to the variables below
@@ -142,7 +147,7 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
                 fileDocument = getDocumentFileFor(currentFileName, currentNetworkPacket.getBoolean("open", false));
 
                 if (currentNetworkPacket.hasPayload()) {
-                    outputStream = new BufferedOutputStream(getDevice().getContext().getContentResolver().openOutputStream(fileDocument.getUri()));
+                    outputStream = new BufferedOutputStream(getDevice().getContext().getContentResolver().openOutputStream(fileDocument.getUri()), TransferTuning.COPY_BUFFER_SIZE);
                     InputStream inputStream = currentNetworkPacket.getPayload().getInputStream();
 
                     long received = receiveFile(inputStream, outputStream);
@@ -188,7 +193,13 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
                     listIsEmpty = networkPacketList.isEmpty();
                 }
 
-                if (listIsEmpty && !isCancelled()) {
+                // Only wait for stragglers when more files are still expected; after the last file this
+                // used to add a pointless 1 s to every transfer.
+                boolean expectingMoreFiles;
+                synchronized (lock) {
+                    expectingMoreFiles = currentFileNum < totalNumFiles;
+                }
+                if (listIsEmpty && !isCancelled() && expectingMoreFiles) {
                     try {
                         Thread.sleep(1000);
                     } catch (InterruptedException ignored) {}
@@ -281,15 +292,21 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
     }
 
     private long receiveFile(InputStream input, OutputStream output) throws IOException {
-        byte[] data = new byte[4096];
+        byte[] data = new byte[TransferTuning.COPY_BUFFER_SIZE];
         int count;
         long received = 0;
+        final long startedNanos = System.nanoTime();
 
         while ((count = input.read(data)) >= 0 && !isCancelled()) {
             received += count;
             totalReceived += count;
 
             output.write(data, 0, count);
+
+            double mbps = speedMeter.onBytes(count);
+            if (mbps >= 0) {
+                speedSuffix = "  \u00b7  " + TransferTuning.formatSpeed(mbps);
+            }
 
             long progressPercentage;
             synchronized (lock) {
@@ -307,6 +324,10 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
 
         output.flush();
 
+        double seconds = Math.max((System.nanoTime() - startedNanos) / 1e9, 0.001);
+        Log.i("SharePlugin", String.format(Locale.US, "Payload received: %d bytes in %.2f s (%.1f MB/s)",
+                received, seconds, (received / 1_048_576.0) / seconds));
+
         return received;
     }
 
@@ -319,7 +340,7 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
     private void setProgress(int progress) {
         synchronized (lock) {
             receiveNotification.setProgress(progress, getDevice().getContext().getResources()
-                    .getQuantityString(R.plurals.incoming_files_text, totalNumFiles, currentFileName, currentFileNum, totalNumFiles));
+                    .getQuantityString(R.plurals.incoming_files_text, totalNumFiles, currentFileName, currentFileNum, totalNumFiles) + speedSuffix);
         }
         receiveNotification.show();
     }

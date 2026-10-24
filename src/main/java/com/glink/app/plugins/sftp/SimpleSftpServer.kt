@@ -261,7 +261,7 @@ internal class SimpleSftpServer {
 
         val SUPPORTS_NATIVEFS = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
-        private val PORT_RANGE = 1739..1764
+        private val PORT_RANGE = 2096..2128
         const val USER: String = "glink"
 
         init {

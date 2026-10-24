@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
  */
 package com.glink.app.ui.compose.screen.aboutglink
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -15,9 +18,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -27,6 +35,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.glink.app.ui.compose.KdeTheme
 import com.glink.app.ui.compose.components.KdeThemePreviews
+import com.glink.app.BuildConfig
 import com.glink.app.R
 
 @Composable
@@ -62,43 +71,53 @@ fun AboutGLinkScreen(
         item {
             HtmlCard(stringResource(R.string.about_glink_support))
         }
-
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.mascot),
-                    contentDescription = stringResource(id = R.string.mascot),
-                    modifier = Modifier.height(256.dp)
-                )
-            }
-        }
     }
 }
 
 @Composable
 private fun Header() {
+    // Brand banner: same blue-to-violet gradient as the app icon, white text (>= 4.5:1 on both ends)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .clip(MaterialTheme.shapes.extraLarge)
+            .background(Brush.linearGradient(listOf(Color(0xFF2B5BF0), Color(0xFF7B4DFF))))
+            .padding(horizontal = 24.dp, vertical = 28.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.ic_glink_48dp),
-            contentDescription = null,
-            modifier = Modifier.size(48.dp),
-            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
-        )
-        Text(
-            text = stringResource(id = R.string.glink_be_free),
-            style = MaterialTheme.typography.titleLarge
-        )
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(MaterialTheme.shapes.large)
+                .background(Color.White.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                imageVector = ImageVector.vectorResource(id = R.drawable.ic_glink_symbol),
+                contentDescription = null,
+                modifier = Modifier.size(44.dp),
+                colorFilter = ColorFilter.tint(Color.White)
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = stringResource(id = R.string.glink_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White
+            )
+            Text(
+                text = stringResource(id = R.string.glink_be_free),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White
+            )
+            Text(
+                text = "v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.9f)
+            )
+        }
     }
 }
 
@@ -110,8 +129,12 @@ private fun HtmlCard(htmlContent: String) {
             .replace("</h1>", "</h1><br>")
     }
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Text(
             text = AnnotatedString.fromHtml(
@@ -125,7 +148,7 @@ private fun HtmlCard(htmlContent: String) {
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(16.dp),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface
         )

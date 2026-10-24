@@ -167,6 +167,7 @@ class PairingHandler(private val device: Device, private val callback: PairingCa
         np["pair"] = true
         pairingTimestamp = System.currentTimeMillis() / 1000L
         np["timestamp"] = pairingTimestamp
+        np["certificate"] = SslHelper.getCertificatePem()
         device.sendPacket(np, statusCallback)
     }
 
@@ -185,6 +186,7 @@ class PairingHandler(private val device: Device, private val callback: PairingCa
         }
         val np = NetworkPacket(NetworkPacket.PACKET_TYPE_PAIR)
         np["pair"] = true
+        np["certificate"] = SslHelper.getCertificatePem()
         device.sendPacket(np, stateCallback)
     }
 

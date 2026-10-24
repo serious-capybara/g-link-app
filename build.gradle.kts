@@ -272,6 +272,7 @@ dependencies {
     implementation(libs.androidx.recyclerview)
     implementation(libs.androidx.swiperefreshlayout)
     implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.work.runtime.ktx) // ReconnectWorker: deep-doze / process-death fallback
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.extensions)

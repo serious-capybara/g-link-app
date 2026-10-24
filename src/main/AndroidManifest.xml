@@ -188,6 +188,12 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
         </receiver>
 
         <activity
+            android:name="com.glink.app.plugins.rdp.ScreenShareActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:label="@string/rdp_title" />
+
+        <activity
             android:name="com.glink.app.plugins.findmyphone.FindMyPhoneActivity"
             android:configChanges="orientation|screenSize"
             android:excludeFromRecents="true"

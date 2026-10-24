@@ -10,6 +10,7 @@ import android.content.Context;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.WorkerThread;
 
 import org.apache.commons.io.IOUtils;
@@ -19,7 +20,9 @@ import com.glink.app.backends.BaseLinkProvider;
 import com.glink.app.Device;
 import com.glink.app.DeviceInfo;
 import com.glink.app.helpers.security.SslHelper;
+import com.glink.app.helpers.SpeedMeter;
 import com.glink.app.helpers.ThreadHelper;
+import com.glink.app.helpers.TransferTuning;
 import com.glink.app.NetworkPacket;
 
 import java.io.BufferedInputStream;
@@ -27,11 +30,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.channels.NotYetConnectedException;
 import java.security.cert.CertificateException;
+import java.util.Locale;
 
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLSocket;
@@ -113,6 +118,20 @@ public class LanLink extends BaseLink {
     @Override
     public String getName() {
         return "LanLink";
+    }
+
+    /**
+     * @return the IP address of the remote device on this link, or null if the socket is gone
+     */
+    @Nullable
+    public String getRemoteHost() {
+        SSLSocket current = socket;
+        if (current == null) return null;
+        SocketAddress address = current.getRemoteSocketAddress();
+        if (address instanceof InetSocketAddress && ((InetSocketAddress) address).getAddress() != null) {
+            return ((InetSocketAddress) address).getAddress().getHostAddress();
+        }
+        return null;
     }
 
     @Override
@@ -199,6 +218,9 @@ public class LanLink extends BaseLink {
 
                 payloadSocket = server.accept();
 
+                // Bigger send buffer for big files (no-op for small ones, see TransferTuning)
+                TransferTuning.applySendBuffer(payloadSocket, np.getPayloadSize());
+
                 //Convert to SSL if needed
                 payloadSocket = SslHelper.convertToSslSocket(context, payloadSocket, getDeviceId(), true, false);
 
@@ -206,15 +228,21 @@ public class LanLink extends BaseLink {
                 inputStream = np.getPayload().getInputStream();
 
                 Log.i("GLink/LanLink", "Beginning to send payload for " + np.getType());
-                byte[] buffer = new byte[4096];
+                // 256 KiB chunks instead of 4 KiB: far fewer reads/writes/TLS records per MB
+                byte[] buffer = new byte[TransferTuning.COPY_BUFFER_SIZE];
                 int bytesRead;
                 long size = np.getPayloadSize();
                 long progress = 0;
                 long timeSinceLastUpdate = -1;
+                final SpeedMeter speedMeter = new SpeedMeter();
+                final long startedNanos = System.nanoTime();
                 while (!np.isCanceled() && (bytesRead = inputStream.read(buffer)) != -1) {
-                    //Log.e("ok",""+bytesRead);
                     progress += bytesRead;
                     outputStream.write(buffer, 0, bytesRead);
+                    double mbps = speedMeter.onBytes(bytesRead);
+                    if (mbps >= 0) {
+                        callback.onPayloadSpeedChanged(mbps);
+                    }
                     if (size > 0) {
                         if (timeSinceLastUpdate + 500 < System.currentTimeMillis()) { //Report progress every half a second
                             long percent = ((100 * progress) / size);
@@ -223,6 +251,9 @@ public class LanLink extends BaseLink {
                         }
                     }
                 }
+                double seconds = Math.max((System.nanoTime() - startedNanos) / 1e9, 0.001);
+                Log.i("GLink/LanLink", String.format(Locale.US, "Payload sent: %d bytes in %.2f s (%.1f MB/s)",
+                        progress, seconds, (progress / 1_048_576.0) / seconds));
                 outputStream.flush();
                 Log.i("GLink/LanLink", "Finished sending payload (" + progress + " bytes written)");
             }
@@ -246,6 +277,8 @@ public class LanLink extends BaseLink {
         if (np.hasPayloadTransferInfo()) {
             Socket payloadSocket = new Socket();
             try {
+                // Must happen before connect(): the TCP window scale is negotiated in the SYN
+                TransferTuning.applyReceiveBuffer(payloadSocket, np.getPayloadSize());
                 int tcpPort = np.getPayloadTransferInfo().getInt("port");
                 InetSocketAddress deviceAddress = (InetSocketAddress) socket.getRemoteSocketAddress();
                 payloadSocket.connect(new InetSocketAddress(deviceAddress.getAddress(), tcpPort));

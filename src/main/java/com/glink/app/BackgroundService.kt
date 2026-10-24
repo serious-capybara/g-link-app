@@ -14,6 +14,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.ConnectivityManager.NetworkCallback
+import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
@@ -128,7 +129,23 @@ class BackgroundService : Service() {
                 isConnectedToNonCellularNetwork.postValue(false)
                 onNetworkChange(network)
             }
+
+            // onAvailable() fires before the interface has an IP address. The event that actually makes us
+            // reachable is the first LinkProperties update that carries addresses, so react to that too.
+            // We only fire when the address set changed to avoid restarting discovery on DNS/RA noise.
+            private var lastAddresses: Set<String> = emptySet()
+
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                val addresses = linkProperties.linkAddresses.mapNotNull { it.address.hostAddress }.toSet()
+                if (addresses == lastAddresses) return
+                lastAddresses = addresses
+                Log.i("BackgroundService", "Link addresses changed: $addresses")
+                onNetworkChange(network)
+            }
         })
+
+        // Safety net for process death / deep doze: re-checks connectivity every ~15 min on unmetered networks.
+        ReconnectWorker.schedule(applicationContext)
 
         registerLinkProviders()
         addConnectionListener(applicationInstance.connectionListener) // Link Providers need to be already registered

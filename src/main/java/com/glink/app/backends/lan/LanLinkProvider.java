@@ -12,6 +12,8 @@ import android.Manifest;
 import android.content.Context;
 import android.net.Network;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.util.Pair;
 
@@ -63,10 +65,10 @@ import kotlin.text.Charsets;
  */
 public class LanLinkProvider extends BaseLinkProvider {
 
-    final static int UDP_PORT = 1716;
-    final static int MIN_PORT = 1716;
-    final static int MAX_PORT = 1764;
-    final static int PAYLOAD_TRANSFER_MIN_PORT = 1739;
+    final static int UDP_PORT = 2064;
+    final static int MIN_PORT = 2064;
+    final static int MAX_PORT = 2128;
+    final static int PAYLOAD_TRANSFER_MIN_PORT = 2096;
 
     final static int MAX_IDENTITY_PACKET_SIZE = 1024 * 512;
     final static int MAX_UDP_PACKET_SIZE = 1024 * 512;
@@ -88,6 +90,20 @@ public class LanLinkProvider extends BaseLinkProvider {
 
     private long lastBroadcast = 0;
     private final static long delayBetweenBroadcasts = 200;
+
+    // UDP is lossy and the first packet after a Wi-Fi (re)connect often hits a radio that is still waking up.
+    // Instead of one shot we send a short burst; the receiver de-duplicates (rateLimitByDeviceId).
+    private final static long[] BROADCAST_BURST_DELAYS_MS = {0, 150, 400};
+
+    // Trailing-edge debounce: a network event that arrives inside the cooldown is NOT dropped, it is deferred.
+    // (The "link properties ready" event is often the second one, and it is the one that carries a usable IP.)
+    private final Handler debounceHandler = new Handler(Looper.getMainLooper());
+    private final Object debounceLock = new Object();
+    private boolean networkChangePending = false;
+    @Nullable private Network pendingNetwork = null;
+
+    // Discovery latency benchmark: set when discovery starts, logged when the first link comes up.
+    private volatile long discoveryStartedAtNanos = 0;
 
     private boolean isStopped = true;
 
@@ -268,6 +284,8 @@ public class LanLinkProvider extends BaseLinkProvider {
     private void configureSocket(Socket socket) {
         try {
             socket.setKeepAlive(true);
+            // Small request/response packets must not wait for Nagle + delayed ACK (tens of ms each)
+            socket.setTcpNoDelay(true);
         } catch (SocketException e) {
             Log.e("LanLink", "Exception", e);
         }
@@ -388,6 +406,10 @@ public class LanLinkProvider extends BaseLinkProvider {
             Log.d("GLink/LanLinkProvider", "Creating a new link for device " + deviceInfo.id);
             link = new LanLink(context, deviceInfo, this, socket);
             visibleDevices.put(deviceInfo.id, link);
+            long started = discoveryStartedAtNanos;
+            if (started != 0) {
+                Log.i("GLink/Discovery", "link up with " + deviceInfo.id + " " + ((System.nanoTime() - started) / 1_000_000) + " ms after discovery start");
+            }
             onConnectionReceived(link);
         }
     }
@@ -511,11 +533,39 @@ public class LanLinkProvider extends BaseLinkProvider {
                 }
             }
 
+            if (TrustedNetworkHelper.isTrustedNetwork(context)) {
+                try {
+                    java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
+                    while (interfaces != null && interfaces.hasMoreElements()) {
+                        java.net.NetworkInterface ni = interfaces.nextElement();
+                        if (ni.isLoopback() || !ni.isUp()) continue;
+                        for (java.net.InterfaceAddress ia : ni.getInterfaceAddresses()) {
+                            InetAddress bcast = ia.getBroadcast();
+                            if (bcast != null && !ipList.contains(bcast)) {
+                                ipList.add(bcast);
+                            }
+                        }
+                    }
+                } catch (Exception ignored) { }
+            }
+
             if (ipList.isEmpty()) {
                 return;
             }
 
-            sendUdpIdentityPacket(ipList, network);
+            for (int i = 0; i < BROADCAST_BURST_DELAYS_MS.length; i++) {
+                long wait = BROADCAST_BURST_DELAYS_MS[i] - (i == 0 ? 0 : BROADCAST_BURST_DELAYS_MS[i - 1]);
+                if (wait > 0) {
+                    try {
+                        Thread.sleep(wait);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                if (isStopped) return;
+                sendUdpIdentityPacket(ipList, network);
+            }
         });
     }
 
@@ -542,7 +592,9 @@ public class LanLinkProvider extends BaseLinkProvider {
 
         DatagramSocket socket;
         try {
-            socket = new DatagramSocket();
+            socket = new DatagramSocket(null); // Create unbound socket
+            socket.setReuseAddress(true);
+            socket.bind(new InetSocketAddress(0)); // Bind to any local port
             if (network != null) {
                 try {
                     network.bindSocket(socket);
@@ -551,7 +603,6 @@ public class LanLinkProvider extends BaseLinkProvider {
                     e.printStackTrace();
                 }
             }
-            socket.setReuseAddress(true);
             socket.setBroadcast(true);
         } catch (SocketException e) {
             Log.e("GLink/LanLinkProvider", "Failed to create DatagramSocket", e);
@@ -574,6 +625,7 @@ public class LanLinkProvider extends BaseLinkProvider {
     public void onStart() {
         //Log.i("GLink/LanLinkProvider", "onStart");
         isStopped = false;
+        discoveryStartedAtNanos = System.nanoTime();
 
         setupUdpListener();
         setupTcpListener();
@@ -591,11 +643,12 @@ public class LanLinkProvider extends BaseLinkProvider {
     @Override
     public void onNetworkChange(@Nullable Network network) {
         if (isStopped) return;
-        if (System.currentTimeMillis() < lastBroadcast + delayBetweenBroadcasts) {
-            Log.i("LanLinkProvider", "onNetworkChange: relax cowboy");
-            return;
-        }
+
+        // Immediate discovery trigger upon network change
+        Log.i("LanLinkProvider", "onNetworkChange: triggering immediate broadcast");
+
         lastBroadcast = System.currentTimeMillis();
+        discoveryStartedAtNanos = System.nanoTime();
 
         setupUdpListener();
         setupTcpListener();
@@ -603,9 +656,9 @@ public class LanLinkProvider extends BaseLinkProvider {
         broadcastUdpIdentityPacket(network);
         synchronized (mdnsDiscovery) {
             if (TrustedNetworkHelper.isTrustedNetwork(context)) {
-                mdnsDiscovery.startAnnouncing(); // noop if already announcing
+                mdnsDiscovery.startAnnouncing();
             } else {
-                mdnsDiscovery.stopAnnouncing(); // noop if already stopped
+                mdnsDiscovery.stopAnnouncing();
             }
             mdnsDiscovery.stopDiscovering();
             mdnsDiscovery.startDiscovering();
@@ -616,6 +669,8 @@ public class LanLinkProvider extends BaseLinkProvider {
     public void onStop() {
         //Log.i("GLink/LanLinkProvider", "onStop");
         isStopped = true;
+        debounceHandler.removeCallbacksAndMessages(null);
+        synchronized (debounceLock) { networkChangePending = false; pendingNetwork = null; }
         synchronized (mdnsDiscovery) {
             mdnsDiscovery.stopAnnouncing();
             mdnsDiscovery.stopDiscovering();
